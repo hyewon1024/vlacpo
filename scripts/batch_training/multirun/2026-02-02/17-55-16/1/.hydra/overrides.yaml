@@ -1,0 +1,11 @@
+- train.wandb_group_name=safetygym_failure_pred
+- dataset=safetygym_point
+- dataset.data_path_prefix=/home/hyewon/cpon_vla/safety-gym/dataset_collect/safetygym_point
+- dataset.unseen_task_ratio=0.5
+- dataset.load_to_cuda=False
+- model=lstm
+- model.batch_size=64
+- model.lr=0.0001
+- model.lambda_reg=0.01
+- train.seed=0
+- train.exp_suffix=lstm_multi_task

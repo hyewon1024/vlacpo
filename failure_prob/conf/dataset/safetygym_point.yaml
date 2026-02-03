@@ -1,0 +1,13 @@
+defaults:
+  - base_safetygym 
+name: safetygym_point
+
+data_path: ""
+
+data_path_prefix: ""
+load_to_cuda: False
+
+unseen_task_ratio: 0.4
+seen_train_ratio: 0.6
+pred_horizon: 1
+exec_horizon: 1

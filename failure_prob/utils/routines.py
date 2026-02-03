@@ -20,13 +20,8 @@ import matplotlib.pyplot as plt
 
 from failure_prob.data.utils import Rollout
 import cv2
-from .metrics import (
-    eval_fixed_threshold,
+from .metrics_safetygym import (
     eval_scores_roc_prc, 
-    get_metrics_curve, 
-    eval_split_conformal,
-    eval_functional_conformal,
-    eval_det_time_vs_classification,
 )
 
 
@@ -52,145 +47,203 @@ def model_forward_dataloader(
     
     return scores, valid_masks, labels
 
+from sklearn.metrics import roc_auc_score, average_precision_score
 
-def eval_metrics_and_log(
-    cfg: Config,
+def eval_simple_metrics(
     rollouts_by_split_name: dict[str, list[Rollout]],
-    metric_keys: Optional[list[str]] = None, 
-    time_quantiles: list[str] = [1.0]
+    scores_by_split_name: dict[str, list[np.ndarray]],
 ):
-    to_be_logged = {}
-    classification_logs = []
-    
-    if metric_keys is None:
-        metric_keys = rollouts_by_split_name['train'][0].logs.columns
-        
-    for metric_key in metric_keys:
-        if metric_key not in rollouts_by_split_name['train'][0].logs.columns:
-            print(f"Skipping {metric_key}")
-            continue
-        
-        metric_name = metric_key.split("/")[-1]
-        # scores_by_split_name will be a dict: split name -> list of np arrays
-        scores_by_split_name = {
-            k: get_metrics_curve(v, metric_key) 
-            for k, v in rollouts_by_split_name.items()
-        }
-        
-        #### Evaluate ROC and PRC metrics at certain timesteps ####
-        metrics_logs = eval_scores_roc_prc(
-            rollouts_by_split_name, 
-            scores_by_split_name, 
-            metric_name, 
-            time_quantiles,
-            plot_auc_curves=True,
-            plot_score_curves=True,
-        )
-        to_be_logged.update(metrics_logs)
-        
-        #### Evaluate the classification performance using different thresholding methods ####
-        # Split Conformal Prediction: val_seen for calibration, val_unseen for testing
-        # Here we only use val_seen for calibration, to make it comparable to learned methods
-        split_cp_logs = eval_split_conformal(
-            rollouts_by_split_name, scores_by_split_name, metric_name,
-            calib_split_names=["val_seen"], test_split_names=["val_unseen"]
-        )
-        split_cp_logs = pd.DataFrame(split_cp_logs)
-        to_be_logged[f"classify_cp_maxsofar/{metric_name}"] = wandb.Table(dataframe=split_cp_logs)
-        
-        # Functional Conformal Prediction
-        df, cp_bands_by_alpha = eval_functional_conformal(
-            rollouts_by_split_name, scores_by_split_name, metric_name,
-            calib_split_names=["val_seen"], test_split_names=["val_unseen"]
-        )
-        to_be_logged[f"classify_cp_functional/{metric_name}"] = wandb.Table(dataframe=df)
-        
-        # Compute the classification metrics vs. detection time
-        df, logs = eval_perf_det_time_curves(
-            rollouts_by_split_name, scores_by_split_name, metric_name
-        )
-        to_be_logged.update(logs)
-        
-        if cfg.train.eval_save_logs:
-            os.makedirs(cfg.train.logs_save_path, exist_ok=True)
-            df.to_csv(f"{cfg.train.logs_save_path}/{metric_name}_perf_vs_det.csv", index=False)
-        
-    # Convert the classification logs to a wandb table
-    classification_logs = pd.DataFrame(classification_logs)
-    to_be_logged["classify/metrics"] = wandb.Table(dataframe=classification_logs)
-    
-    return to_be_logged
+    logs = {}
 
+    for split_name, rollouts in rollouts_by_split_name.items():
+        scores_all = scores_by_split_name[split_name]
+
+        # 1 = failure, 0 = success
+        labels = np.asarray([1 - r.episode_success for r in rollouts])
+
+        # rollout 단위 score: max score 사용 (가장 위험했던 순간)
+        max_scores = np.array([s.max() if len(s) > 0 else 0.0 for s in scores_all])
+
+        auroc = roc_auc_score(labels, max_scores)
+        auprc = average_precision_score(labels, max_scores)
+
+        logs[f"{split_name}/AUROC"] = auroc
+        logs[f"{split_name}/AUPRC"] = auprc
+
+    return logs
 
 def eval_model_and_log(
     cfg: Config,
-    model: BaseModel, 
+    model: BaseModel,
     rollouts_by_split_name: dict[str, list[Rollout]],
     dataloader_by_split_name: dict[str, DataLoader],
-    eval_time_quantiles: list[float], 
-    plot_auc_curves: bool = True,
-    plot_score_curves: bool = True,
-    log_classification_metrics: bool = True,
 ):
-    to_be_logged = {}
-    method_name = "model"
-    
-    #### Forward the model and compute the scores ####
     scores_by_split_name = {}
+
     for split, dataloader in dataloader_by_split_name.items():
-        # Re-create a dataset to disable shuffling
-        dataloader = DataLoader(dataloader.dataset, batch_size=cfg.model.batch_size, shuffle=False, num_workers=0)
+        dataloader = DataLoader(
+            dataloader.dataset,
+            batch_size=cfg.model.batch_size,
+            shuffle=False,
+            num_workers=0
+        )
+
         with torch.no_grad():
             scores, valid_masks, _ = model_forward_dataloader(model, dataloader)
-        scores = scores.detach().cpu().numpy()
-        seq_lengths = valid_masks.sum(dim=-1).cpu().numpy() # (B,)
-        scores_by_split_name[split] = [scores[i, :int(seq_lengths[i])] for i in range(len(seq_lengths))]
 
-    #### Evaluate ROC and PRC metrics at certain timesteps ####
-    roc_rpc_logs = eval_scores_roc_prc(
-        rollouts_by_split_name, 
-        scores_by_split_name, 
-        method_name,
-        eval_time_quantiles,
-        plot_auc_curves, 
-        plot_score_curves
-    )
-    to_be_logged.update(roc_rpc_logs)
+        scores = scores.cpu().numpy()
+        seq_lengths = valid_masks.sum(dim=-1).cpu().numpy()
+
+        scores_by_split_name[split] = [
+            scores[i, :int(seq_lengths[i])] for i in range(len(seq_lengths))
+        ]
+
+    logs = eval_simple_metrics(rollouts_by_split_name, scores_by_split_name)
+
+    print("\n===== Evaluation Results =====")
+    for k, v in logs.items():
+        print(f"{k}: {v:.4f}")
+
+    return logs
+
+# def eval_metrics_and_log(
+#     cfg: Config,
+#     rollouts_by_split_name: dict[str, list[Rollout]],
+#     metric_keys: Optional[list[str]] = None, 
+#     time_quantiles: list[str] = [1.0]
+# ):
+#     to_be_logged = {}
+#     classification_logs = []
     
-    #### Evaluate the classification performance using different thresholding methods ####
-    if log_classification_metrics:
-        # Compute the metrics at fixed thresholds
-        df = eval_fixed_threshold(
-            rollouts_by_split_name, scores_by_split_name, method_name,
-        )
-        to_be_logged[f"classify_fixed_thresh/{method_name}"] = wandb.Table(dataframe=df)
-
-        # Split Conformal Prediction: val_seen for calibration, val_unseen for testing
-        split_cp_logs = eval_split_conformal(
-            rollouts_by_split_name, scores_by_split_name, method_name,
-            calib_split_names=["val_seen"], test_split_names=["val_unseen"]
-        )
-        split_cp_logs = pd.DataFrame(split_cp_logs)
-        to_be_logged[f"classify_cp_maxsofar/{method_name}"] = wandb.Table(dataframe=split_cp_logs)
+#     if metric_keys is None:
+#         metric_keys = rollouts_by_split_name['train'][0].logs.columns
         
-        # Functional Conformal Prediction
-        df, cp_bands_by_alpha = eval_functional_conformal(
-            rollouts_by_split_name, scores_by_split_name, method_name,
-            calib_split_names=["val_seen"], test_split_names=["val_unseen"]
-        )
-        to_be_logged[f"classify_cp_functional/{method_name}"] = wandb.Table(dataframe=df)
+#     for metric_key in metric_keys:
+#         if metric_key not in rollouts_by_split_name['train'][0].logs.columns:
+#             print(f"Skipping {metric_key}")
+#             continue
         
-        # Compute the classification metrics vs. detection time, by varying thresholds
-        df, logs = eval_perf_det_time_curves(
-            rollouts_by_split_name, scores_by_split_name, method_name
-        )
-        to_be_logged.update(logs)
-
-        if cfg.train.eval_save_logs:
-            os.makedirs(cfg.train.logs_save_path, exist_ok=True)
-            df.to_csv(f"{cfg.train.logs_save_path}/{method_name}_perf_vs_det.csv", index=False)
+#         metric_name = metric_key.split("/")[-1]
+#         # scores_by_split_name will be a dict: split name -> list of np arrays
+#         scores_by_split_name = {
+#             k: get_metrics_curve(v, metric_key) 
+#             for k, v in rollouts_by_split_name.items()
+#         }
+        
+#         #### Evaluate ROC and PRC metrics at certain timesteps ####
+#         metrics_logs = eval_scores_roc_prc(
+#             rollouts_by_split_name, 
+#             scores_by_split_name, 
+#             metric_name, 
+#             time_quantiles,
+#             plot_auc_curves=True,
+#             plot_score_curves=True,
+#         )
+#         to_be_logged.update(metrics_logs)
+        
+#         #### Evaluate the classification performance using different thresholding methods ####
+#         # Split Conformal Prediction: val_seen for calibration, val_unseen for testing
+#         # Here we only use val_seen for calibration, to make it comparable to learned methods
+#         split_cp_logs = eval_split_conformal(
+#             rollouts_by_split_name, scores_by_split_name, metric_name,
+#             calib_split_names=["val_seen"], test_split_names=["val_unseen"]
+#         )
+#         split_cp_logs = pd.DataFrame(split_cp_logs)
+#         to_be_logged[f"classify_cp_maxsofar/{metric_name}"] = wandb.Table(dataframe=split_cp_logs)
+        
+#         # Functional Conformal Prediction
+#         df, cp_bands_by_alpha = eval_functional_conformal(
+#             rollouts_by_split_name, scores_by_split_name, metric_name,
+#             calib_split_names=["val_seen"], test_split_names=["val_unseen"]
+#         )
+#         to_be_logged[f"classify_cp_functional/{metric_name}"] = wandb.Table(dataframe=df)
+        
+#         # Compute the classification metrics vs. detection time
+#         df, logs = eval_perf_det_time_curves(
+#             rollouts_by_split_name, scores_by_split_name, metric_name
+#         )
+#         to_be_logged.update(logs)
+        
+#         if cfg.train.eval_save_logs:
+#             os.makedirs(cfg.train.logs_save_path, exist_ok=True)
+#             df.to_csv(f"{cfg.train.logs_save_path}/{metric_name}_perf_vs_det.csv", index=False)
+        
+#     # Convert the classification logs to a wandb table
+#     classification_logs = pd.DataFrame(classification_logs)
+#     to_be_logged["classify/metrics"] = wandb.Table(dataframe=classification_logs)
     
-    return to_be_logged
+#     return to_be_logged
+
+
+# def eval_model_and_log(
+#     cfg: Config,
+#     model: BaseModel, 
+#     rollouts_by_split_name: dict[str, list[Rollout]],
+#     dataloader_by_split_name: dict[str, DataLoader],
+#     eval_time_quantiles: list[float], 
+#     plot_auc_curves: bool = True,
+#     plot_score_curves: bool = True,
+#     log_classification_metrics: bool = True,
+# ):
+#     to_be_logged = {}
+#     method_name = "model"
+    
+#     #### Forward the model and compute the scores ####
+#     scores_by_split_name = {}
+#     for split, dataloader in dataloader_by_split_name.items():
+#         # Re-create a dataset to disable shuffling
+#         dataloader = DataLoader(dataloader.dataset, batch_size=cfg.model.batch_size, shuffle=False, num_workers=0)
+#         with torch.no_grad():
+#             scores, valid_masks, _ = model_forward_dataloader(model, dataloader)
+#         scores = scores.detach().cpu().numpy()
+#         seq_lengths = valid_masks.sum(dim=-1).cpu().numpy() # (B,)
+#         scores_by_split_name[split] = [scores[i, :int(seq_lengths[i])] for i in range(len(seq_lengths))]
+
+#     #### Evaluate ROC and PRC metrics at certain timesteps ####
+#     roc_rpc_logs = eval_scores_roc_prc(
+#         rollouts_by_split_name, 
+#         scores_by_split_name, 
+#         method_name,
+#         eval_time_quantiles,
+#         plot_auc_curves, 
+#         plot_score_curves
+#     )
+#     to_be_logged.update(roc_rpc_logs)
+    
+#     #### Evaluate the classification performance using different thresholding methods ####
+#     if log_classification_metrics:
+#         # Compute the metrics at fixed thresholds
+#         df = eval_fixed_threshold(
+#             rollouts_by_split_name, scores_by_split_name, method_name,
+#         )
+#         to_be_logged[f"classify_fixed_thresh/{method_name}"] = wandb.Table(dataframe=df)
+
+#         # Split Conformal Prediction: val_seen for calibration, val_unseen for testing
+#         split_cp_logs = eval_split_conformal(
+#             rollouts_by_split_name, scores_by_split_name, method_name,
+#             calib_split_names=["val_seen"], test_split_names=["val_unseen"]
+#         )
+#         split_cp_logs = pd.DataFrame(split_cp_logs)
+#         to_be_logged[f"classify_cp_maxsofar/{method_name}"] = wandb.Table(dataframe=split_cp_logs)
+        
+#         # Functional Conformal Prediction
+#         df, cp_bands_by_alpha = eval_functional_conformal(
+#             rollouts_by_split_name, scores_by_split_name, method_name,
+#             calib_split_names=["val_seen"], test_split_names=["val_unseen"]
+#         )
+#         to_be_logged[f"classify_cp_functional/{method_name}"] = wandb.Table(dataframe=df)
+        
+#         # Compute the classification metrics vs. detection time, by varying thresholds
+#         df, logs = eval_perf_det_time_curves(
+#             rollouts_by_split_name, scores_by_split_name, method_name
+#         )
+#         to_be_logged.update(logs)
+
+#         if cfg.train.eval_save_logs:
+#             os.makedirs(cfg.train.logs_save_path, exist_ok=True)
+#             df.to_csv(f"{cfg.train.logs_save_path}/{method_name}_perf_vs_det.csv", index=False)
+    
+#     return to_be_logged
 
 
 def eval_perf_det_time_curves(

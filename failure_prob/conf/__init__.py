@@ -134,7 +134,14 @@ class PizeroDatasetConfig(DatasetConfig):
     diff_idx_rel: float | str = "mean"
     horizon_idx_rel: float | str = "mean"
     
-
+@dataclass
+class SafetyGymDatasetConfig(DatasetConfig):
+    name: str = "safetygym"
+    data_path: str = ""
+    data_path_prefix: str = ""
+    token_idx_rel: float = 0.0
+    unseen_task_ratio: float = 0.2  
+    seen_train_ratio: float = 0.8
 #########################
 # Model Configurations
 #########################
@@ -264,7 +271,7 @@ class TrainConfig:
     eval_save_video_multiproc: bool = True
     eval_save_timing_plots: bool = False
     eval_save_logs: bool = False
-    eval_save_ckpt: bool = False
+    eval_save_ckpt: bool = True
     logs_save_root: str = "./logs/"
     logs_save_path: str = MISSING
     eval_cp_alpha: float = 0.2
@@ -296,6 +303,7 @@ cs.store(group="dataset", name="base_open_pizero", node=OpenPizeroDatasetConfig)
 cs.store(group="dataset", name="base_pizero_fast", node=PizeroFastDatasetConfig)
 cs.store(group="dataset", name="base_pizero", node=PizeroDatasetConfig)
 cs.store(group="dataset", name="base_pizero_fast_droid", node=PizeroFastDroidDatasetConfig)
+cs.store(group="dataset", name="safetygym_point", node=SafetyGymDatasetConfig)
 
 # Register model variants into the "model" config group.
 cs.store(group="model", name="base_indep", node=IndepModelConfig)

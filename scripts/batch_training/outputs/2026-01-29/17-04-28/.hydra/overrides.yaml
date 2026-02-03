@@ -1,0 +1,10 @@
+- train.wandb_group_name=test
+- dataset=safetygym_point
+- dataset.data_path_prefix=
+- dataset.load_to_cuda=False
+- model=lstm
+- model.batch_size=64
+- model.lr=0.001
+- model.lambda_reg=0.1
+- train.seed=0
+- train.exp_suffix=lstm

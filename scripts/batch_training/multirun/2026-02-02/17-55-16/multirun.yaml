@@ -1,0 +1,232 @@
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  sweep:
+    dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    _target_: hydra._internal.core_plugins.basic_launcher.BasicLauncher
+  sweeper:
+    _target_: hydra._internal.core_plugins.basic_sweeper.BasicSweeper
+    max_batch_size: null
+    params: null
+  help:
+    app_name: ${hydra.job.name}
+    header: '${hydra.help.app_name} is powered by Hydra.
+
+      '
+    footer: 'Powered by Hydra (https://hydra.cc)
+
+      Use --hydra-help to view Hydra specific help
+
+      '
+    template: '${hydra.help.header}
+
+      == Configuration groups ==
+
+      Compose your configuration from those groups (group=option)
+
+
+      $APP_CONFIG_GROUPS
+
+
+      == Config ==
+
+      Override anything in the config (foo.bar=value)
+
+
+      $CONFIG
+
+
+      ${hydra.help.footer}
+
+      '
+  hydra_help:
+    template: 'Hydra (${hydra.runtime.version})
+
+      See https://hydra.cc for more info.
+
+
+      == Flags ==
+
+      $FLAGS_HELP
+
+
+      == Configuration groups ==
+
+      Compose your configuration from those groups (For example, append hydra/job_logging=disabled
+      to command line)
+
+
+      $HYDRA_CONFIG_GROUPS
+
+
+      Use ''--cfg hydra'' to Show the Hydra config.
+
+      '
+    hydra_help: ???
+  hydra_logging:
+    version: 1
+    formatters:
+      simple:
+        format: '[%(asctime)s][HYDRA] %(message)s'
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        stream: ext://sys.stdout
+    root:
+      level: INFO
+      handlers:
+      - console
+    loggers:
+      logging_example:
+        level: DEBUG
+    disable_existing_loggers: false
+  job_logging:
+    version: 1
+    formatters:
+      simple:
+        format: '[%(asctime)s][%(name)s][%(levelname)s] - %(message)s'
+    handlers:
+      console:
+        class: logging.StreamHandler
+        formatter: simple
+        stream: ext://sys.stdout
+      file:
+        class: logging.FileHandler
+        formatter: simple
+        filename: ${hydra.runtime.output_dir}/${hydra.job.name}.log
+    root:
+      level: INFO
+      handlers:
+      - console
+      - file
+    disable_existing_loggers: false
+  env: {}
+  mode: MULTIRUN
+  searchpath: []
+  callbacks: {}
+  output_subdir: .hydra
+  overrides:
+    hydra:
+    - hydra.mode=MULTIRUN
+    task:
+    - train.wandb_group_name=safetygym_failure_pred
+    - dataset=safetygym_point
+    - dataset.data_path_prefix=/home/hyewon/cpon_vla/safety-gym/dataset_collect/safetygym_point
+    - dataset.unseen_task_ratio=0.5
+    - dataset.load_to_cuda=False
+    - model=lstm
+    - model.batch_size=64
+    - model.lr=1e-4,3e-4,1e-3
+    - model.lambda_reg=1e-3,1e-2,1e-1,1
+    - train.seed=0
+    - train.exp_suffix=lstm_multi_task
+  job:
+    name: train
+    chdir: null
+    override_dirname: dataset.data_path_prefix=/home/hyewon/cpon_vla/safety-gym/dataset_collect/safetygym_point,dataset.load_to_cuda=False,dataset.unseen_task_ratio=0.5,dataset=safetygym_point,model.batch_size=64,model.lambda_reg=1e-3,1e-2,1e-1,1,model.lr=1e-4,3e-4,1e-3,model=lstm,train.exp_suffix=lstm_multi_task,train.seed=0,train.wandb_group_name=safetygym_failure_pred
+    id: ???
+    num: ???
+    config_name: config
+    env_set: {}
+    env_copy: []
+    config:
+      override_dirname:
+        kv_sep: '='
+        item_sep: ','
+        exclude_keys: []
+  runtime:
+    version: 1.3.2
+    version_base: '1.3'
+    cwd: /home/hyewon/cpon_vla/scripts/batch_training
+    config_sources:
+    - path: hydra.conf
+      schema: pkg
+      provider: hydra
+    - path: /home/hyewon/cpon_vla/failure_prob/conf
+      schema: file
+      provider: main
+    - path: ''
+      schema: structured
+      provider: schema
+    output_dir: ???
+    choices:
+      model: lstm
+      dataset: safetygym_point
+      hydra/env: default
+      hydra/callbacks: null
+      hydra/job_logging: default
+      hydra/hydra_logging: default
+      hydra/hydra_help: default
+      hydra/help: default
+      hydra/sweeper: basic
+      hydra/launcher: basic
+      hydra/output: default
+  verbose: false
+dataset:
+  name: safetygym_point
+  subset_name: default
+  data_path_prefix: /home/hyewon/cpon_vla/safety-gym/dataset_collect/safetygym_point
+  data_path: ''
+  data_path_unseen: null
+  load_to_cuda: false
+  normalize_hidden_states: false
+  pred_horizon: 1
+  exec_horizon: 1
+  unseen_task_ratio: 0.5
+  seen_train_ratio: 0.6
+  rbf_beta: 1.0
+  precomputed_normalize: false
+  dim_features: ???
+  dim_action: ???
+  failure_time_label_path: null
+  token_idx_rel: 0.0
+model:
+  name: lstm
+  use_time_weighting: false
+  n_epochs: 1000
+  batch_size: 64
+  optimizer: adam
+  lr: 0.0003
+  lr_step_size: 300
+  lr_gamma: 1.0
+  weight_decay: 0.01
+  warmup_steps: 0
+  lambda_success: 1.0
+  lambda_fail: 1.0
+  lambda_reg: 1.0
+  cumsum: false
+  rmean: false
+  init_weight_scale: 1.0
+  grad_max_norm: null
+  dropout: 0.0
+  n_layers: 1
+  hidden_dim: 256
+  n_history_steps: -1
+  one_loss_per_seq: false
+  lambda_hard_heg: 0.0
+  hard_neg_margin: 0.1
+  hard_neg_beta: 50.0
+train:
+  log_precomputed: false
+  log_precomputed_only: false
+  seed: 0
+  wandb_project: vla-safe
+  wandb_dir: ./wandb
+  wandb_group_name: safetygym_failure_pred
+  exp_suffix: lstm_multi_task
+  exp_name: ${dataset.name}-${dataset.subset_name}-${model.name}-${train.exp_suffix}
+  debug: false
+  vis_every: 500
+  roc_every: 25
+  eval_save_video: false
+  eval_save_video_functional: false
+  eval_save_video_multiproc: true
+  eval_save_timing_plots: false
+  eval_save_logs: false
+  eval_save_ckpt: true
+  logs_save_root: ./logs/
+  logs_save_path: ${train.logs_save_root}/${train.exp_name}/${now:%Y%m%d}/${now:%H%M%S}
+  eval_cp_alpha: 0.2

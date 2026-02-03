@@ -7,6 +7,7 @@ EXP_NAME_2_DISPLAY_NAME = {
     "pi0fast_libero_v4": "$\\pi_0$-FAST LIBERO",
     "pi0diff_libero_v1": "$\\pi_0$ LIBERO",
     "pi0fast_droid_0510": "$\\pi_0$-FAST Franka",
+    "safetygym_point": "SafetyGym_point"
 }
 
 

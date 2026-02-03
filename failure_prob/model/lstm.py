@@ -71,6 +71,44 @@ class LstmModel(BaseModel):
 
         return p_seq
 
+    # def forward_compute_loss(
+    #     self, 
+    #     batch: dict[str, torch.Tensor],
+    #     weights: list[float] = None, 
+    # ) -> tuple[torch.Tensor, dict[str, float]]:
+    #     valid_masks = batch["valid_masks"] 
+    #     failure_labels = batch["failure_labels"]   
+    #     B, T, D = batch["features"].shape
+        
+    #     scores = self(batch).squeeze(-1) 
+
+    #     time_weights = get_time_weight(
+    #         self.cfg.model.use_time_weighting, valid_masks
+    #     ).to(scores)  
+
+    #     criterion = nn.BCELoss(reduction="none")
+    #     print(scores.min().item(), scores.max().item())
+
+    #     losses = criterion(scores, failure_labels)
+    #     losses = losses * time_weights * valid_masks
+
+    #     monitor_loss = losses.sum() / valid_masks.sum()
+    #     with torch.no_grad():
+    #         fail_mask = (failure_labels == 1) * valid_masks
+    #         success_mask = (failure_labels == 0) * valid_masks
+
+    #         fail_loss = (losses * fail_mask).sum() / (fail_mask.sum() + 1e-6)
+    #         success_loss = (losses * success_mask).sum() / (success_mask.sum() + 1e-6)
+    #     hard_neg_loss = torch.tensor(0.0, device=scores.device)
+
+    #     logs = {
+    #         "monitor_loss": monitor_loss.item(),
+    #         "success_loss": success_loss.item(),
+    #         "fail_loss": fail_loss.item(),
+    #         "hard_neg_loss": 0.0,
+    #     }
+
+    #     return monitor_loss, logs
 
     def forward_compute_loss(
         self, 
@@ -88,25 +126,26 @@ class LstmModel(BaseModel):
         time_weights = get_time_weight(self.cfg.model.use_time_weighting, valid_masks)  # (B, T)
         time_weights = time_weights.to(scores) # (B, T)
         
-        if self.cfg.model.cumsum:
-            # Compute the loss as if each sequence is successful or failure, then aggregate back to (B, T)
-            lower_thresh = 0
-            seq_loss_success = torch.relu(scores - lower_thresh)  # (B, T)
-            seq_loss_fail = time_weights * (- scores)
+        # if self.cfg.model.cumsum:
+        #     # Compute the loss as if each sequence is successful or failure, then aggregate back to (B, T)
+        #     lower_thresh = 0
+        #     seq_loss_success = torch.relu(scores - lower_thresh)  # (B, T)
+        #     seq_loss_fail = time_weights * (- scores)
                 
-            losses = (success_labels == 1).float()[:, None] * seq_loss_success + \
-                (success_labels == 0).float()[:, None] * seq_loss_fail  # (B, T)
-        else:
-            # Compute BCE loss on scores at all timesteps
-            criterion = nn.BCELoss(reduction="none")
-            # Failure is the positive class
-            if scores.isnan().any():
-                import pdb; pdb.set_trace()
-            losses = criterion(scores, 1 - success_labels.unsqueeze(-1).expand_as(scores)) # (B, T)
-            
-            # Apply the time weights only on the failure samples
-            losses[success_labels == 0] *= time_weights[success_labels == 0] # (B, T)
+        #     losses = (success_labels == 1).float()[:, None] * seq_loss_success + \
+        #         (success_labels == 0).float()[:, None] * seq_loss_fail  # (B, T)
+        # else:
+
+        # Compute BCE loss on scores at all timesteps
+        criterion = nn.BCELoss(reduction="none")
+        # Failure is the positive class
+        if scores.isnan().any():
+            import pdb; pdb.set_trace()
+        losses = criterion(scores, 1 - success_labels.unsqueeze(-1).expand_as(scores)) # (B, T)
         
+        # Apply the time weights only on the failure samples
+        losses[success_labels == 0] *= time_weights[success_labels == 0] # (B, T)
+    
         monitor_loss, success_loss, fail_loss = aggregate_monitor_loss(
             losses, valid_masks, success_labels, weights,
             self.cfg.model.one_loss_per_seq,

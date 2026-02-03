@@ -20,7 +20,7 @@ from failure_prob.utils.constants import MANUAL_METRICS, EVAL_TIME_QUANTILES
 from failure_prob.utils.timer import Timer
 from failure_prob.utils.routines import (
     eval_model_and_log,
-    eval_metrics_and_log,
+    # eval_metrics_and_log,
     eval_save_timing_plots,
 )
 from failure_prob.utils.video import eval_save_videos, eval_save_videos_functional_cp
@@ -155,10 +155,10 @@ def main(cfg: Config) -> None:
                     model, 
                     rollouts_by_split_name, 
                     dataloader_by_split_name,
-                    EVAL_TIME_QUANTILES[cfg.dataset.name], 
-                    plot_score_curves = epoch == n_epochs - 1,
-                    plot_auc_curves = epoch == n_epochs - 1,
-                    log_classification_metrics = epoch == n_epochs - 1,
+                    # EVAL_TIME_QUANTILES[cfg.dataset.name], 
+                    # plot_score_curves = epoch == n_epochs - 1,
+                    # plot_auc_curves = epoch == n_epochs - 1,
+                    # log_classification_metrics = epoch == n_epochs - 1,
                 )
                 to_be_logged.update(eval_logs)
                 

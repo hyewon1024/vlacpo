@@ -1,0 +1,5 @@
+defaults:
+  - safetygym_point
+
+data_path: point_multi/
+multi_sample: True
