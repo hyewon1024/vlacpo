@@ -157,7 +157,7 @@ flash_attn_cache
 slurm_logs
 /outputs
 /multirun
-/results
+/openvla_widowx
 /logs
 /artifacts
 /setup_envs.bash
